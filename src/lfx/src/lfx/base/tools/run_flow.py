@@ -532,7 +532,14 @@ class RunFlowBaseComponent(Component):
             )  # may or may not want to create a deepcopy of the graph here
 
             if tweaks := self._build_flow_tweak_data():
-                graph = self._process_tweaks_on_graph(graph, tweaks)
+                from lfx.processing.process import process_tweaks_on_graph
+
+                # These tweaks are this component's own declared inputs, not a
+                # caller overriding the sub-flow, so the deployment policy does
+                # not judge them. Without this, ``off`` would stop the Run Flow
+                # component and every flow used as an agent tool from working.
+                # The protected-field floor still applies.
+                graph = process_tweaks_on_graph(graph, tweaks, caller_supplied=False)
 
             result = await run_flow(
                 inputs=self._build_inputs(tweaks),
@@ -544,7 +551,17 @@ class RunFlowBaseComponent(Component):
                 graph=graph,
             )
 
-        except Exception:  # noqa: BLE001
+        except Exception as exc:
+            from lfx.exceptions.tweaks import TweakRefusedError
+            from lfx.run.hitl import NestedHITLUnsupportedError
+
+            if isinstance(exc, NestedHITLUnsupportedError):
+                raise
+            # A refused tweak is a caller error, not a flow failure. Collapsing it
+            # into a generic RuntimeError would discard the refused field names and
+            # the reason, and the caller would never learn which key was rejected.
+            if isinstance(exc, TweakRefusedError):
+                raise
             msg = f"Error running flow: {self.flow_name_selected}"
             raise RuntimeError(msg) from None
 
@@ -752,17 +769,3 @@ class RunFlowBaseComponent(Component):
             self._attributes["flow_name_selected_updated_at"] = self._cached_flow_updated_at
         # remove stale data from previous toolmode run
         self._attributes.pop("flow_tweak_data", None)
-
-    def _process_tweaks_on_graph(self, graph: Graph, tweaks: dict[str, dict[str, Any]]):
-        # there is a bug with the lfx process_tweaks_on_graph function
-        # that causes it to not persist the tweaks to the graph at runtime.
-        # so we implement a custom version here that fixes the bug.
-        # TODO: make a fast follow-up PR to fix this bug in the existing helper.
-        for vertex in graph.vertices:
-            if not (isinstance(vertex, Vertex) and isinstance(vertex.id, str)):
-                continue
-            if not (node_tweaks := tweaks.get(vertex.id)):
-                continue
-            node_tweaks.pop("code", None)
-            vertex.update_raw_params(node_tweaks, overwrite=True)
-        return graph

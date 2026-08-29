@@ -1,4 +1,4 @@
-import { render } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import type { APIClassType } from "@/types/api";
 import Dropdown from "../index";
@@ -146,6 +146,9 @@ describe("Dropdown value reset bug", () => {
         nodeClass={mockNodeClass}
         handleNodeClass={jest.fn()}
         id="test-dropdown"
+        editNode={false}
+        handleOnNewValue={jest.fn()}
+        disabled={false}
       />,
     );
 
@@ -165,6 +168,9 @@ describe("Dropdown value reset bug", () => {
         nodeClass={mockNodeClass}
         handleNodeClass={jest.fn()}
         id="test-dropdown"
+        editNode={false}
+        handleOnNewValue={jest.fn()}
+        disabled={false}
       />,
     );
 
@@ -184,9 +190,38 @@ describe("Dropdown value reset bug", () => {
         nodeClass={mockNodeClass}
         handleNodeClass={jest.fn()}
         id="test-dropdown"
+        editNode={false}
+        handleOnNewValue={jest.fn()}
+        disabled={false}
       />,
     );
 
     expect(mockOnSelect).not.toHaveBeenCalledWith("", undefined, true);
+  });
+});
+
+describe("Dropdown accessibility", () => {
+  // The search box is a bare <input> that only carried a placeholder, which is
+  // not an accessible name (WCAG 4.1.2 / 3.3.2).
+  it("should_name_the_search_input", () => {
+    render(
+      <Dropdown
+        value="tool_a"
+        options={["tool_a", "tool_b"]}
+        onSelect={jest.fn()}
+        name="tool"
+        nodeId="test-node"
+        nodeClass={mockNodeClass}
+        handleNodeClass={jest.fn()}
+        id="test-dropdown"
+        editNode={false}
+        handleOnNewValue={jest.fn()}
+        disabled={false}
+      />,
+    );
+
+    expect(screen.getByTestId("dropdown_search_input")).toHaveAccessibleName(
+      "Search options...",
+    );
   });
 });

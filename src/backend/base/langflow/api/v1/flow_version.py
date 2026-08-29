@@ -11,9 +11,11 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from langflow.api.utils import CurrentActiveUser, DbSession
-from langflow.api.utils.core import remove_api_keys
+from langflow.api.utils.core import strip_secret_field_values
+from langflow.api.v1.flows import _validate_catalog_policy_for_write
 from langflow.api.v1.mappers.deployments.helpers import get_owned_provider_account_or_404
 from langflow.api.v1.mappers.deployments.sync import sync_flow_version_attachments
+from langflow.services.authorization import FlowAction, ensure_flow_permission
 from langflow.services.database.models.flow.model import Flow, FlowRead
 from langflow.services.database.models.flow_version.crud import (
     create_flow_version_entry,
@@ -36,21 +38,24 @@ from langflow.services.database.models.flow_version.model import (
     FlowVersionRead,
     FlowVersionReadWithData,
 )
-from langflow.services.deps import get_settings_service
+from langflow.services.deps import get_catalog_policy_service, get_settings_service
 
 router = APIRouter(prefix="/flows/{flow_id}/versions", tags=["Flow Versions"], include_in_schema=False)
 
 
 def strip_version_data(data: dict | None) -> dict | None:
-    """Strip API keys from a version entry's flow data dict.
+    """Strip secret field values from a version entry's flow data dict.
+
+    Uses the metadata-driven scrubber, so ``password``-marked fields under
+    ordinary names and credential-bearing connection strings are cleared too --
+    not only fields whose name matches the legacy API-key pattern.
 
     Returns None if stripping fails, to prevent accidental secret leakage.
     """
     if data is None:
         return None
-    data_copy = copy.deepcopy(data)
     try:
-        return remove_api_keys({"data": data_copy}).get("data")
+        return strip_secret_field_values(data)
     except (KeyError, TypeError, AttributeError, ValueError):
         logger.warning(
             "Failed to strip API keys from version data — excluding data from response to prevent secret leakage",
@@ -201,6 +206,14 @@ async def create_snapshot(
     body: FlowVersionCreate | None = None,
 ) -> FlowVersionRead:
     flow = await _get_user_flow(session, flow_id, current_user.id)
+    await ensure_flow_permission(
+        current_user,
+        FlowAction.WRITE,
+        flow_id=flow.id,
+        flow_user_id=flow.user_id,
+        workspace_id=flow.workspace_id,
+        folder_id=flow.folder_id,
+    )
     description = body.description if body else None
 
     try:
@@ -234,6 +247,14 @@ async def activate_version(
     save_draft: Annotated[bool, Query()] = True,
 ) -> FlowRead:
     flow = await _get_user_flow(session, flow_id, current_user.id)
+    await ensure_flow_permission(
+        current_user,
+        FlowAction.WRITE,
+        flow_id=flow.id,
+        flow_user_id=flow.user_id,
+        workspace_id=flow.workspace_id,
+        folder_id=flow.folder_id,
+    )
 
     # Verify version entry belongs to this flow
     try:
@@ -255,6 +276,11 @@ async def activate_version(
             status_code=422,
             detail="Flow data could not be copied. The data may be corrupted.",
         ) from exc
+
+    _validate_catalog_policy_for_write(
+        target_data,
+        snapshot=get_catalog_policy_service().snapshot,
+    )
 
     # Wrap auto-snapshot + flow overwrite in a single savepoint for atomicity.
     # If the flow update fails, the auto-snapshot is also rolled back.
@@ -299,7 +325,15 @@ async def delete_version_entry(
     current_user: CurrentActiveUser,
     session: DbSession,
 ) -> None:
-    await _get_user_flow(session, flow_id, current_user.id)
+    flow = await _get_user_flow(session, flow_id, current_user.id)
+    await ensure_flow_permission(
+        current_user,
+        FlowAction.DELETE,
+        flow_id=flow.id,
+        flow_user_id=flow.user_id,
+        workspace_id=flow.workspace_id,
+        folder_id=flow.folder_id,
+    )
 
     # Verify entry belongs to this flow, then delete
     try:

@@ -5,24 +5,36 @@ import { cn } from "@/utils/utils";
 export default function NodeUpdateComponent({
   hasBreakingChange,
   blocked = false,
+  blockedByCatalogPolicy = false,
   showNode,
   handleUpdateCode,
   loadingUpdate,
   setDismissAll,
   dismissed = false,
   isRequired = false,
+  disabled = false,
 }: {
   hasBreakingChange: boolean;
   blocked?: boolean;
+  blockedByCatalogPolicy?: boolean;
   showNode: boolean;
   handleUpdateCode: () => void;
   loadingUpdate: boolean;
   setDismissAll: (value: boolean) => void;
   dismissed?: boolean;
   isRequired?: boolean;
+  disabled?: boolean;
 }) {
   const { t } = useTranslation();
   const showUpdateAction = !blocked;
+  // `blocked` only reaches here when a catalog policy applies or custom
+  // components are off, so those are the only two causes the copy can name.
+  const blockedMessage = blockedByCatalogPolicy
+    ? t("node.updateBlockedByPolicyMessage")
+    : t("node.updateBlockedMessage");
+  const blockedLabel = blockedByCatalogPolicy
+    ? t("node.updateBlockedByPolicyLabel")
+    : t("node.updateBlockedLabel");
 
   if (dismissed && isRequired) {
     return (
@@ -34,9 +46,7 @@ export default function NodeUpdateComponent({
         <div className={cn("h-2.5 w-2.5 rounded-full", "bg-accent-amber")} />
         <div className="mb-px flex-1 truncate text-mmd font-medium">
           {showNode &&
-            (blocked
-              ? t("node.updateBlockedMessage")
-              : t("node.upgradeRequiredMessage"))}
+            (blocked ? blockedMessage : t("node.upgradeRequiredMessage"))}
         </div>
         {showUpdateAction && (
           <Button
@@ -47,6 +57,7 @@ export default function NodeUpdateComponent({
               handleUpdateCode();
             }}
             loading={loadingUpdate}
+            disabled={disabled}
             data-testid={hasBreakingChange ? "review-button" : "update-button"}
           >
             {hasBreakingChange
@@ -66,7 +77,7 @@ export default function NodeUpdateComponent({
         : "bg-status-green";
 
   const label = blocked
-    ? t("node.updateBlockedLabel")
+    ? blockedLabel
     : isRequired
       ? t("node.updateRequiredLabel")
       : hasBreakingChange
@@ -80,8 +91,14 @@ export default function NodeUpdateComponent({
       )}
     >
       <div className={cn("h-2.5 w-2.5 rounded-full", dotColor)} />
-      <div className="mb-px flex-1 truncate text-mmd font-medium">
-        {showNode && label}
+      {/* A blocked node offers no update action, so the label is the only
+          explanation it has. Keep it even while collapsed, where the row is
+          narrow enough to truncate, and carry the full text in the title. */}
+      <div
+        className="mb-px flex-1 truncate text-mmd font-medium"
+        title={blocked ? blockedMessage : undefined}
+      >
+        {showNode || blocked ? label : null}
       </div>
 
       <Button
@@ -94,6 +111,7 @@ export default function NodeUpdateComponent({
         }}
         aria-label={t("node.dismissWarning")}
         data-testid="dismiss-warning-bar"
+        disabled={disabled}
       >
         {t("node.dismiss")}
       </Button>
@@ -106,6 +124,7 @@ export default function NodeUpdateComponent({
             handleUpdateCode();
           }}
           loading={loadingUpdate}
+          disabled={disabled}
           data-testid={hasBreakingChange ? "review-button" : "update-button"}
         >
           {hasBreakingChange

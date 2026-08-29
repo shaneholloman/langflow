@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/sidebar";
 import { Textarea } from "@/components/ui/textarea";
 import { parseString, sanitizeMcpName } from "@/utils/stringManipulation";
+import { RequiresApprovalToggle } from "./RequiresApprovalToggle";
 
 export default function ToolsTable({
   rows,
@@ -61,8 +62,9 @@ export default function ToolsTable({
   const { setOpen: setSidebarOpen } = useSidebar();
 
   const getRowId = useMemo(() => {
-    // biome-ignore lint/suspicious/noExplicitAny: legacy
-    return (params: any) =>
+    return (params: {
+      data: { _uniqueId?: string; name?: string; display_name?: string };
+    }) =>
       params.data._uniqueId ||
       `${params.data.name}_${params.data.display_name}`;
   }, []);
@@ -217,7 +219,6 @@ export default function ToolsTable({
         ? t("toolsModal.columnTool")
         : t("toolsModal.columnSlug"),
       flex: 1,
-      resizable: false,
       valueGetter: (params) =>
         params.data.name !== ""
           ? parseString(params.data.name, [
@@ -237,6 +238,27 @@ export default function ToolsTable({
                 "uppercase",
               ]),
       cellClass: "text-muted-foreground",
+    },
+    {
+      field: "approval_actions",
+      headerName: t("toolsModal.columnApproval", "Requires Approval"),
+      width: 150,
+      flex: 0,
+      resizable: false,
+      sortable: false,
+      cellRenderer: (params: {
+        data: { _uniqueId?: string; approval_actions?: string[] } & Record<
+          string,
+          unknown
+        >;
+      }) => (
+        <div data-hitl-cell className="flex h-full items-center">
+          <RequiresApprovalToggle
+            selected={params.data?.approval_actions ?? []}
+            onChange={(next) => handleApprovalChange(params.data, next)}
+          />
+        </div>
+      ),
     },
     {
       field: "tags",
@@ -293,6 +315,17 @@ export default function ToolsTable({
     }
   };
 
+  const handleApprovalChange = (
+    row: { _uniqueId?: string } & Record<string, unknown>,
+    actions: string[],
+  ) => {
+    if (!row?._uniqueId) return;
+    skipSelectionReapply.current++;
+    const updatedRow = { ...row, approval_actions: actions };
+    agGrid.current?.api.applyTransaction({ update: [updatedRow] });
+    setData(data.map((r) => (r._uniqueId === row._uniqueId ? updatedRow : r)));
+  };
+
   const actionArgs = useMemo(() => {
     return Object.entries(focusedRow?.args ?? {}).map(
       // biome-ignore lint/suspicious/noExplicitAny: legacy
@@ -324,6 +357,10 @@ export default function ToolsTable({
   };
 
   const handleRowClicked = (event) => {
+    // Clicking the HITL cell opens its own popover; don't also open the row sidebar
+    // (that re-render would close the popover).
+    const target = event.event?.target as HTMLElement | undefined;
+    if (target?.closest("[data-hitl-cell]")) return;
     setFocusedRow(event.data);
     setSidebarOpen(true);
   };
@@ -344,7 +381,9 @@ export default function ToolsTable({
 
   return (
     <>
-      <main className="flex h-full w-full flex-1 flex-col gap-2 overflow-hidden py-4">
+      {/* Not a <main>: the flow canvas underneath already owns the single
+          main landmark (WCAG 2.4.1). */}
+      <div className="flex h-full w-full flex-1 flex-col gap-2 overflow-hidden py-4">
         <div className="flex-none px-4">
           <Input
             icon="Search"
@@ -374,7 +413,7 @@ export default function ToolsTable({
             onGridReady={handleGridReady}
           />
         </div>
-      </main>
+      </div>
       <Sidebar
         side="right"
         className="flex h-full flex-col overflow-auto border-l border-border"
